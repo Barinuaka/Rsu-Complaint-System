@@ -2,6 +2,8 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProfileController;
+use App\Models\Complaint;
+use Illuminate\Support\Facades\Auth;
 
 Route::get('/', function () {
     return view('welcome');
@@ -33,13 +35,18 @@ Route::get('/lecturer/dashboard', function () {
 
 // HOD dashboard
 Route::get('/hod/dashboard', function () {
-    return view('dashboards.hod');
-})->middleware(['auth'])->name('hod.dashboard');
+    $user = Auth::user();
 
-// Course Adviser dashboard
-Route::get('/adviser/dashboard', function () {
-    return view('dashboards.adviser');
-})->middleware(['auth'])->name('adviser.dashboard');
+    // Fetch complaints that match this HOD's campus and role layout
+    $complaints = Complaint::with(['category', 'campus'])
+        ->where('campus_id', $user->campus_id)
+        ->where('assigned_to', $user->role_id) 
+        ->whereIn('current_status', ['submitted', 'pending', 'in_progress']) // Now accepts fresh 'submitted' complaints!
+        ->orderBy('sla_deadline_at', 'asc') 
+        ->get();
+
+    return view('dashboards.hod', compact('complaints'));
+})->middleware(['auth'])->name('hod.dashboard');
 
 // Dean dashboard
 Route::get('/dean/dashboard', function () {
