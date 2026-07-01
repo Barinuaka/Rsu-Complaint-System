@@ -208,4 +208,112 @@ class ComplaintController extends Controller
             'vader_score'   => -0.3,
         ];
     }
+
+    // Show full complaint detail for officers
+    public function detail($id)
+    {
+        $complaint = Complaint::with([
+            'category',
+            'campus',
+            'submitter',
+            'assignedOfficer',
+            'updates.officer',
+        ])->findOrFail($id);
+
+        // Load potential escalation targets
+        $escalationOfficers = User::whereIn('role_id', [4, 5, 6])
+            ->where('campus_id', $complaint->campus_id)
+            ->get();
+
+        return view('complaints.detail', compact('complaint', 'escalationOfficers'));
+    }
+
+    // Officer marks complaint as in_review
+    public function updateStatus(Request $request, $id)
+    {
+        $complaint = Complaint::findOrFail($id);
+
+        $request->validate([
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $previousStatus = $complaint->current_status;
+        $complaint->update(['current_status' => 'in_review']);
+
+        ComplaintUpdate::create([
+            'complaint_id'    => $complaint->id,
+            'updated_by'      => Auth::id(),
+            'action_type'     => 'status_changed',
+            'previous_status' => $previousStatus,
+            'new_status'      => 'in_review',
+            'update_note'     => $request->note ?? 'Officer marked complaint as under review.',
+            'updated_at'      => now(),
+        ]);
+
+        return redirect()->route('complaints.detail', $id)
+            ->with('success', 'Complaint marked as In Review.');
+    }
+
+    // Officer resolves the complaint
+    public function resolve(Request $request, $id)
+    {
+        $complaint = Complaint::findOrFail($id);
+
+        $request->validate([
+            'resolution_note' => ['required', 'string', 'min:10', 'max:2000'],
+        ]);
+
+        $previousStatus = $complaint->current_status;
+
+        $complaint->update([
+            'current_status'  => 'resolved',
+            'resolution_note' => $request->resolution_note,
+            'resolved_at'     => now(),
+        ]);
+
+        ComplaintUpdate::create([
+            'complaint_id'    => $complaint->id,
+            'updated_by'      => Auth::id(),
+            'action_type'     => 'resolved',
+            'previous_status' => $previousStatus,
+            'new_status'      => 'resolved',
+            'update_note'     => $request->resolution_note,
+            'updated_at'      => now(),
+        ]);
+
+        return redirect()->route('complaints.detail', $id)
+            ->with('success', 'Complaint has been resolved successfully.');
+    }
+
+    // Officer escalates complaint to higher authority
+    public function escalate(Request $request, $id)
+    {
+        $complaint = Complaint::findOrFail($id);
+
+        $request->validate([
+            'escalation_note'   => ['required', 'string', 'min:10'],
+            'escalate_to_user'  => ['required', 'exists:users,id'],
+        ]);
+
+        $previousStatus = $complaint->current_status;
+
+        $complaint->update([
+            'current_status'    => 'escalated',
+            'assigned_to'       => $request->escalate_to_user,
+            'escalation_count'  => $complaint->escalation_count + 1,
+        ]);
+
+        ComplaintUpdate::create([
+            'complaint_id'    => $complaint->id,
+            'updated_by'      => Auth::id(),
+            'action_type'     => 'escalated',
+            'previous_status' => $previousStatus,
+            'new_status'      => 'escalated',
+            'update_note'     => 'Escalated: ' . $request->escalation_note,
+            'updated_at'      => now(),
+        ]);
+
+        return redirect()->route('complaints.detail', $id)
+            ->with('success', 'Complaint escalated successfully.');
+    }
 }

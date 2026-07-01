@@ -37,28 +37,58 @@ Route::get('/lecturer/dashboard', function () {
 Route::get('/hod/dashboard', function () {
     $user = Auth::user();
 
-    // Fetch complaints that match this HOD's campus and role layout
+    // Fetch complaints assigned to THIS specific HOD user (by user ID, not role ID)
     $complaints = Complaint::with(['category', 'campus'])
         ->where('campus_id', $user->campus_id)
-        ->where('assigned_to', $user->role_id) 
-        ->whereIn('current_status', ['submitted', 'pending', 'in_progress']) // Now accepts fresh 'submitted' complaints!
-        ->orderBy('sla_deadline_at', 'asc') 
+        ->where('assigned_to', $user->id)
+        ->whereIn('current_status', [
+            'submitted', 'assigned', 'pending',
+            'in_progress', 'in_review', 'escalated'
+        ])
+        ->orderBy('sla_deadline_at', 'asc')
         ->get();
 
     return view('dashboards.hod', compact('complaints'));
 })->middleware(['auth'])->name('hod.dashboard');
 
+// Course Adviser dashboard
+Route::get('/adviser/dashboard', function () {
+    $user = Auth::user();
+
+    // Fetch complaints assigned to THIS specific Course Adviser (by user ID)
+    $complaints = Complaint::with(['category', 'campus'])
+        ->where('campus_id', $user->campus_id)
+        ->where('assigned_to', $user->id)
+        ->whereIn('current_status', [
+            'submitted', 'assigned', 'in_review'
+        ])
+        ->orderBy('sla_deadline_at', 'asc')
+        ->get();
+
+    return view('dashboards.adviser', compact('complaints'));
+})->middleware(['auth'])->name('adviser.dashboard');
+
 // Dean dashboard
 Route::get('/dean/dashboard', function () {
-    return view('dashboards.dean');
+    $user = Auth::user();
+
+    // Dean sees escalated complaints from their campus
+    $complaints = Complaint::with(['category', 'campus'])
+        ->where('campus_id', $user->campus_id)
+        ->whereIn('current_status', ['escalated'])
+        ->orderBy('sla_deadline_at', 'asc')
+        ->get();
+
+    return view('dashboards.dean', compact('complaints'));
 })->middleware(['auth'])->name('dean.dashboard');
 
 // Admin dashboard
-Route::get('/admin/dashboard', function () {
-    return view('dashboards.admin');
-})->middleware(['auth'])->name('admin.dashboard');
+// Admin dashboard
+Route::get('/admin/dashboard', [App\Http\Controllers\AdminController::class, 'dashboard'])
+     ->middleware(['auth'])
+     ->name('admin.dashboard');
 
-// Complaint routes
+// Complaint routes (authenticated users only)
 Route::middleware(['auth'])->group(function () {
     Route::get('/complaints/submit', [App\Http\Controllers\ComplaintController::class, 'create'])
          ->name('complaints.create');
@@ -68,9 +98,35 @@ Route::middleware(['auth'])->group(function () {
          ->name('complaints.confirmation');
 });
 
-// Public tracking — no login required
+// Public complaint tracking — no login required
 Route::get('/track', [App\Http\Controllers\ComplaintController::class, 'track'])
      ->name('complaints.track');
+
+// Complaint action routes (for officers)
+Route::middleware(['auth'])->group(function () {
+    Route::get('/complaints/{id}/detail', [App\Http\Controllers\ComplaintController::class, 'detail'])
+         ->name('complaints.detail');
+    Route::post('/complaints/{id}/update-status', [App\Http\Controllers\ComplaintController::class, 'updateStatus'])
+         ->name('complaints.updateStatus');
+    Route::post('/complaints/{id}/resolve', [App\Http\Controllers\ComplaintController::class, 'resolve'])
+         ->name('complaints.resolve');
+    Route::post('/complaints/{id}/escalate', [App\Http\Controllers\ComplaintController::class, 'escalate'])
+         ->name('complaints.escalate');
+});
+
+
+// Admin user management routes
+Route::middleware(['auth'])->prefix('admin')->group(function () {
+    Route::get('/users', [App\Http\Controllers\AdminController::class, 'users'])
+         ->name('admin.users');
+    Route::get('/users/create', [App\Http\Controllers\AdminController::class, 'createUser'])
+         ->name('admin.users.create');
+    Route::post('/users/create', [App\Http\Controllers\AdminController::class, 'storeUser'])
+         ->name('admin.users.store');
+    Route::post('/users/{id}/toggle-status', [App\Http\Controllers\AdminController::class, 'toggleStatus'])
+         ->name('admin.users.toggle');
+});
+
 
 // Profile routes (required by Breeze navigation bar)
 Route::middleware('auth')->group(function () {
